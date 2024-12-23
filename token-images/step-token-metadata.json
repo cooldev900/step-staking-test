@@ -1,0 +1,14 @@
+{
+    "name": "STEP Token",
+    "symbol": "STP",
+    "description": "Only Possible On Solana",
+    "uri": "https://github.com/cooldev900/step-staking-test/blob/main/token-images/additional-step-metadata.json",
+    "seller_fee_basis_points": 0,
+    "creators": [
+        {
+        "address": "4nPfmzxpWiAdV4zjfJuSz9aRZZpqM4Ucupt2p8TsUCxU",
+        "verified": true,
+        "share": 100
+        }
+    ]
+  }
