@@ -2,7 +2,7 @@
     "name": "Step Token",
     "symbol": "STP",
     "description": "This is a token for testing purposes on Solana Devnet.",
-    "image": "https://github.com/cooldev900/step-staking-test/blob/main/token-images/STEP_token_for_Solana_network.jpeg",
+    "image": "https://github.com/cooldev900/step-staking-test/blob/main/token-metadata/STEP_token_for_Solana_network.jpeg",
     "attributes": [
       {
         "trait_type": "Purpose",
