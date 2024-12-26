@@ -2,7 +2,8 @@
     "scripts": {
         "lint:fix": "prettier */*.js \"*/**/*{.js,.ts}\" -w",
         "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check",
-        "token:addMetadata": "ts-node ./token-metadata/addMetadata.ts"
+        "token:addMetadata": "ts-node ./token-metadata/addMetadata.ts",
+        "token:createXStepToken": "ts-node ./token-metadata/createToken.ts"
     },
     "dependencies": {
         "@coral-xyz/anchor": "^0.28.0",
