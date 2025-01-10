@@ -8,10 +8,15 @@ import {
   getAccount,
   getAssociatedTokenAddress,
   createAssociatedTokenAccount,
+  setAuthority,
+  AuthorityType,
+  createMint,
+  getMint,
+  getOrCreateAssociatedTokenAccount,
 } from "@solana/spl-token";
-import { ASSOCIATED_PROGRAM_ID } from "@coral-xyz/anchor/dist/cjs/utils/token";
 import { expect } from "chai";
-import { Keypair, PublicKey } from "@solana/web3.js";
+import { Keypair, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
+import { SPL_SYSTEM_PROGRAM_ID } from "@metaplex-foundation/mpl-toolbox";
 
 dotenv.config();
 
@@ -22,17 +27,97 @@ describe("step-staking-test", () => {
   const program = anchor.workspace.StepStakingTest as Program<StepStakingTest>;
 
   let mintKey: Keypair;
+  let tokenMintAuthority: Keypair;
   let tokenMint: PublicKey;
+  let xTokenMint: PublicKey;
+  let tokenVault: PublicKey;
+  let nonce: number;
 
   beforeEach(async () => {
-    const keyData = process.env.PRIVATE_KEY.split(",").map((value) => Number(value));
-    if (keyData.length === 0) throw new Error("Invalid PRIVATE_KEY in .env");
+    mintKey = anchor.web3.Keypair.generate();
+    tokenMintAuthority = anchor.web3.Keypair.generate();
 
-    mintKey = anchor.web3.Keypair.fromSecretKey(new Uint8Array(keyData));
-    tokenMint = new anchor.web3.PublicKey("2bgQCuwVFaFMDxmhtunFFgysEbZFJmLteHUkiiLC4Kzd");
+    const connection = provider.connection;
+    let airdropSignature = await connection.requestAirdrop(
+      mintKey.publicKey,
+      LAMPORTS_PER_SOL * 100,
+    );
+    await connection.confirmTransaction(airdropSignature);
+    airdropSignature = await connection.requestAirdrop(
+      tokenMintAuthority.publicKey,
+      LAMPORTS_PER_SOL * 100,
+    );
+    await connection.confirmTransaction(airdropSignature);
+
+    tokenMint = await createMint(
+      provider.connection,
+      mintKey,
+      tokenMintAuthority.publicKey,
+      mintKey.publicKey,
+      9
+    );
+
+    // const tokenAccount = await getOrCreateAssociatedTokenAccount(
+    //   provider.connection,
+    //   mintKey,
+    //   tokenMint,
+    //   mintKey.publicKey
+    // )
+
+    // await mintTo(
+    //   provider.connection,
+    //   mintKey,
+    //   tokenMint,
+    //   tokenAccount.address,
+    //   tokenMintAuthority,
+    //   100000000000 // because decimals for the mint are set to 9 
+    // )
+
+    const [tokenVault, nonce] = await anchor.web3.PublicKey.findProgramAddressSync(
+      [tokenMint.toBuffer()],
+      program.programId
+    );
+
+    await program.methods.initialize().accounts({
+      tokenMint,
+      initializer: mintKey.publicKey,
+      systemProgram: SPL_SYSTEM_PROGRAM_ID,
+      tokenProgram: TOKEN_PROGRAM_ID,
+      tokenVault,
+    })
   });
 
-  it("Withdraw nested ATA", async () => {
+  it("initialize", async () => {
+    const mintInfo = await getMint(provider.connection, tokenMint);
+    expect(mintInfo.mintAuthority.toBase58()).to.be.equal(tokenMintAuthority.publicKey.toBase58());
+    expect(mintInfo.supply).to.be.equal(BigInt(0));
+  })
+
+  // it("reclaim mint authority", async () => {
+    // const [tokenVault, nonce] = await anchor.web3.PublicKey.findProgramAddressSync(
+    //   [tokenMint.toBuffer()],
+    //   program.programId
+    // );
+
+    // await setAuthority(
+    //   provider.connection,
+    //   mintKey,
+    //   tokenMint,
+    //   mintKey,
+    //   AuthorityType.MintTokens,
+    //   tokenVault,
+    // )
+
+    // await program.methods.reclaimMintAuthority(nonce).accounts({
+    //   tokenMint,
+    //   xTokenMint,
+    //   tokenVault,
+    //   authority: mintKey.publicKey,
+    //   tokenProgram: TOKEN_PROGRAM_ID
+    // }).signers([mintKey]).rpc();
+  // })
+
+  // it("Withdraw nested ATA", async () => {
     // const refundee = anchor.web3.Keypair.generate();
   
     // // Find the PDA for the token vault
@@ -91,5 +176,5 @@ describe("step-staking-test", () => {
     // const vaultAccountInfo = await getAccount(provider.connection, tokenVault);
     // console.log({vaultAccountInfo})
     // expect(vaultAccountInfo.amount.toString()).to.equal("1000000");
-  });  
+  // });  
 });

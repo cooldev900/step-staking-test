@@ -1,19 +1,12 @@
 use anchor_lang::prelude::*;
-use anchor_spl::{associated_token::AssociatedToken, token::{Mint, Token, TokenAccount}};
+use anchor_spl::{associated_token::AssociatedToken, token::{Mint, Token, TokenAccount, spl_token::instruction::AuthorityType}};
 
 declare_id!("7ZYww9sNB9iJKYCh3LefK2RiczAHddTLZ8dz9SGSfXzJ");
 
-// #[cfg(not(feature = "local-testing"))]
 // pub mod constants {
-//     pub const STEP_TOKEN_MINT_PUBKEY: &str = "5ehg7BoeVn1sjdKMV613GybX5mz2mYjJdKfZWrpz3CHb";
-//     pub const X_STEP_TOKEN_MINT_PUBKEY: &str = "GqRfdTLC2VnNaQqD3ckit2dox6TfDeMaHc4MM9F5mJAF";
+//     pub const STEP_TOKEN_MINT_PUBKEY: &str = "2bgQCuwVFaFMDxmhtunFFgysEbZFJmLteHUkiiLC4Kzd";
+//     pub const X_STEP_TOKEN_MINT_PUBKEY: &str = "J7d8BestX7duYo1eMW16EUaCcRKLNk2sVUGBGJT9LRa";
 // }
-
-// #[cfg(feature = "local-testing")]
-pub mod constants {
-    pub const STEP_TOKEN_MINT_PUBKEY: &str = "2bgQCuwVFaFMDxmhtunFFgysEbZFJmLteHUkiiLC4Kzd";
-    pub const X_STEP_TOKEN_MINT_PUBKEY: &str = "GqRfdTLC2VnNaQqD3ckit2dox6TfDeMaHc4MM9F5mJAF";
-}
 
 #[program]
 pub mod step_staking_test {
@@ -52,13 +45,35 @@ pub mod step_staking_test {
 
         Ok(())
     }
+
+    pub fn reclaim_mint_authority(ctx: Context<ReclaimMintAuthority>, nonce: u8) -> Result<()> {
+        let token_mint_key = ctx.accounts.token_mint.key();
+        let seeds = &[token_mint_key.as_ref(), &[nonce]];
+        let signer = [&seeds[..]];
+
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            token::SetAuthority {
+                current_authority: ctx.accounts.token_vault.to_account_info(),
+                account_or_mint: ctx.accounts.x_token_mint.to_account_info(),
+            },
+            &signer,
+        );
+        token::set_authority(
+            cpi_ctx,
+            AuthorityType::MintTokens,
+            Some(ctx.accounts.token_mint.mint_authority.unwrap()),
+        )?;
+        Ok(())
+    }
 }
 
 #[derive(Accounts)]
 pub struct Initialize<'info> {
-    #[account(
-        address = constants::STEP_TOKEN_MINT_PUBKEY.parse::<Pubkey>().unwrap(),
-    )]
+    // #[account(
+    //     address = constants::STEP_TOKEN_MINT_PUBKEY.parse::<Pubkey>().unwrap(),
+    // )]
+    #[account()]
     pub token_mint: Box<Account<'info, Mint>>,
 
     #[account(mut)]
@@ -73,7 +88,7 @@ pub struct Initialize<'info> {
         payer = initializer,
         token::mint = token_mint,
         token::authority = token_vault,
-        seeds = [constants::STEP_TOKEN_MINT_PUBKEY.parse::<Pubkey>().unwrap().as_ref()],
+        seeds = [token_mint.key().as_ref()],
         bump,
     )]
     pub token_vault: Box<Account<'info, TokenAccount>>,
@@ -84,9 +99,10 @@ pub struct WithdrawNested<'info> {
     #[account(mut)]
     refundee: SystemAccount<'info>,
 
-    #[account(
-        address = constants::STEP_TOKEN_MINT_PUBKEY.parse::<Pubkey>().unwrap(),
-    )]
+    // #[account(
+    //     address = constants::STEP_TOKEN_MINT_PUBKEY.parse::<Pubkey>().unwrap(),
+    // )]
+    #[account()]
     pub token_mint: Box<Account<'info, Mint>>,
 
     #[account(
@@ -105,4 +121,37 @@ pub struct WithdrawNested<'info> {
 
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
+}
+
+#[derive(Accounts)]
+#[instruction(nonce: u8)]
+pub struct ReclaimMintAuthority<'info> {
+    // #[account(
+    //     address = constants::STEP_TOKEN_MINT_PUBKEY.parse::<Pubkey>().unwrap(),
+    // )]
+    #[account(mut)]
+    pub token_mint: Box<Account<'info, Mint>>,
+
+    // #[account(
+    //     mut,
+    //     address = constants::X_STEP_TOKEN_MINT_PUBKEY.parse::<Pubkey>().unwrap(),
+    // )]
+    #[account(mut)]
+    pub x_token_mint: Box<Account<'info, Mint>>,
+
+    #[account(
+        mut,
+        seeds = [ token_mint.key().as_ref() ],
+        bump = nonce,
+    )]
+    pub token_vault: Box<Account<'info, TokenAccount>>,
+
+    #[account(
+        mut,
+        //only STEP's token authority can sign for this action
+        address = token_mint.mint_authority.unwrap(),
+    )]
+    ///the mint authority of the step token
+    pub authority: Signer<'info>,
+    pub token_program: Program<'info, Token>,
 }
