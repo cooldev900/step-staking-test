@@ -15,5 +15,5 @@ https://explorer.solana.com/address/GqRfdTLC2VnNaQqD3ckit2dox6TfDeMaHc4MM9F5mJAF
 ## Test
 
 ```
-anchor test --provider.cluster devnet
+anchor test
 ```
