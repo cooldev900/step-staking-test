@@ -8,7 +8,7 @@ step_staking_test = "7ZYww9sNB9iJKYCh3LefK2RiczAHddTLZ8dz9SGSfXzJ"
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "Localnet"
+cluster = "http://127.0.0.1:8899"
 wallet = "/home/dev/.config/solana/id.json"
 
 [scripts]

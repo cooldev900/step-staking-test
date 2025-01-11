@@ -11,3 +11,9 @@ https://explorer.solana.com/address/5ehg7BoeVn1sjdKMV613GybX5mz2mYjJdKfZWrpz3CHb
 ```
 https://explorer.solana.com/address/GqRfdTLC2VnNaQqD3ckit2dox6TfDeMaHc4MM9F5mJAF?cluster=devnet
 ```
+
+## Test
+
+```
+anchor test
+```
