@@ -1,5 +1,8 @@
 use anchor_lang::prelude::*;
-use anchor_spl::{associated_token::AssociatedToken, token::{Mint, Token, TokenAccount, spl_token::instruction::AuthorityType}};
+use anchor_spl::{
+    associated_token::AssociatedToken,
+    token::{spl_token::instruction::AuthorityType, Mint, Token, TokenAccount},
+};
 
 declare_id!("7ZYww9sNB9iJKYCh3LefK2RiczAHddTLZ8dz9SGSfXzJ");
 
@@ -24,11 +27,15 @@ pub mod step_staking_test {
         let signer = &[&seeds[..]];
 
         //transfer from vault ata to vault
-        let cpi_ctx = CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), token::Transfer {
-            from: ctx.accounts.token_vault_nested_ata.to_account_info(),
-            to: ctx.accounts.token_vault.to_account_info(),
-            authority: ctx.accounts.token_vault.to_account_info(),
-        }, signer);
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            token::Transfer {
+                from: ctx.accounts.token_vault_nested_ata.to_account_info(),
+                to: ctx.accounts.token_vault.to_account_info(),
+                authority: ctx.accounts.token_vault.to_account_info(),
+            },
+            signer,
+        );
         token::transfer(cpi_ctx, ctx.accounts.token_vault_nested_ata.amount)?;
 
         //close the token account
@@ -66,6 +73,96 @@ pub mod step_staking_test {
         )?;
         Ok(())
     }
+
+    pub fn stake(ctx: Context<Stake>, nonce: u8, amount: u64) -> Result<()> {
+        let total_token = ctx.accounts.token_vault.amount;
+        let total_x_token = ctx.accounts.x_token_mint.supply;
+        let old_price = get_price(&ctx.accounts.token_vault, &ctx.accounts.x_token_mint);
+
+        let token_mint_key = ctx.accounts.token_mint.key();
+        let seeds = &[token_mint_key.as_ref(), &[nonce]];
+        let signer = [&seeds[..]];
+
+        if total_token == 0 || total_x_token == 0 {
+            let cpi_ctx = CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                token::MintTo {
+                    mint: ctx.accounts.x_token_mint.to_account_info(),
+                    to: ctx.accounts.x_token_to.to_account_info(),
+                    authority: ctx.accounts.token_vault.to_account_info(),
+                },
+                &signer,
+            );
+            token::mint_to(cpi_ctx, amount)?;
+        } else {
+            let what: u64 = (amount as u128)
+                .checked_mul(total_x_token as u128)
+                .unwrap()
+                .checked_div(total_token as u128)
+                .unwrap()
+                .try_into()
+                .unwrap();
+
+            let cpi_ctx = CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                token::MintTo {
+                    mint: ctx.accounts.x_token_mint.to_account_info(),
+                    to: ctx.accounts.x_token_to.to_account_info(),
+                    authority: ctx.accounts.token_vault.to_account_info(),
+                },
+                &signer,
+            );
+            token::mint_to(cpi_ctx, what)?;
+        }
+
+        let cpi_ctx = CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            token::Transfer {
+                from: ctx.accounts.token_from.to_account_info(),
+                to: ctx.accounts.token_vault.to_account_info(),
+                authority: ctx.accounts.token_from_authority.to_account_info(),
+            },
+        );
+        token::transfer(cpi_ctx, amount)?;
+
+        ctx.accounts.token_vault.reload()?;
+        ctx.accounts.x_token_mint.reload()?;
+
+        let new_price = get_price(&ctx.accounts.token_vault, &ctx.accounts.x_token_mint);
+
+        emit!(PriceChange {
+            old_step_per_xstep_e9: old_price.0,
+            old_step_per_xstep: old_price.1,
+            new_step_per_xstep_e9: new_price.0,
+            new_step_per_xstep: new_price.1,
+        });
+
+        Ok(())
+    }
+}
+
+const E9: u128 = 1000000000;
+
+pub fn get_price<'info>(
+    vault: &Account<'info, TokenAccount>,
+    mint: &Account<'info, Mint>,
+) -> (u64, String) {
+    let total_token = vault.amount;
+    let total_x_token = mint.supply;
+
+    if total_x_token == 0 {
+        return (0, String::from("0"));
+    }
+
+    let price_uint = (total_token as u128)
+        .checked_mul(E9)
+        .unwrap()
+        .checked_div(total_x_token as u128)
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let price_float = (total_token as f64) / (total_x_token as f64);
+    (price_uint, price_float.to_string())
 }
 
 #[derive(Accounts)]
@@ -154,4 +251,48 @@ pub struct ReclaimMintAuthority<'info> {
     ///the mint authority of the step token
     pub authority: Signer<'info>,
     pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+#[instruction(nonce: u8)]
+pub struct Stake<'info> {
+    // #[account(
+    //     address = constants::STEP_TOKEN_MINT_PUBKEY.parse::<Pubkey>().unwrap(),
+    // )]
+    #[account()]
+    pub token_mint: Box<Account<'info, Mint>>,
+
+    #[account(
+        mut,
+        // address = constants::X_STEP_TOKEN_MINT_PUBKEY.parse::<Pubkey>().unwrap(),
+    )]
+    pub x_token_mint: Box<Account<'info, Mint>>,
+
+    #[account(mut)]
+    //the token account to withdraw from
+    pub token_from: Box<Account<'info, TokenAccount>>,
+
+    //the authority allowed to transfer from token_from
+    pub token_from_authority: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [ token_mint.key().as_ref() ],
+        bump = nonce,
+    )]
+    pub token_vault: Box<Account<'info, TokenAccount>>,
+
+    #[account(mut)]
+    //the token account to send xtoken
+    pub x_token_to: Box<Account<'info, TokenAccount>>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+#[event]
+pub struct PriceChange {
+    pub old_step_per_xstep_e9: u64,
+    pub old_step_per_xstep: String,
+    pub new_step_per_xstep_e9: u64,
+    pub new_step_per_xstep: String,
 }
