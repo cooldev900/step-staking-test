@@ -6,21 +6,14 @@ import {
   TOKEN_PROGRAM_ID,
   mintTo,
   getAccount,
-  getAssociatedTokenAddress,
-  createAssociatedTokenAccount,
-  setAuthority,
-  AuthorityType,
   createMint,
   getMint,
   getOrCreateAssociatedTokenAccount,
-  createAccount,
-  createInitializeAccountInstruction,
 } from "@solana/spl-token";
 import { expect } from "chai";
-import { Keypair, LAMPORTS_PER_SOL, PublicKey, sendAndConfirmTransaction, SystemProgram, Transaction, TransactionInstruction } from "@solana/web3.js";
+import { Keypair, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
 import { SPL_SYSTEM_PROGRAM_ID } from "@metaplex-foundation/mpl-toolbox";
 import { ASSOCIATED_PROGRAM_ID } from "@coral-xyz/anchor/dist/cjs/utils/token";
-import { min } from "bn.js";
 
 dotenv.config();
 
@@ -66,6 +59,14 @@ describe("step-staking-test", () => {
       program.programId,
     );
 
+    xTokenMint = await createMint(
+      provider.connection,
+      mintKey,
+      tokenVault,
+      mintKey.publicKey,
+      9
+    );
+
     await program.methods.initialize().accounts({
       tokenMint,
       initializer: mintKey.publicKey,
@@ -95,10 +96,6 @@ describe("step-staking-test", () => {
       [tokenMint.toBuffer(), Buffer.from([nonce])],
       program.programId,
     );
-    console.log({tokenMint: tokenMint.toBase58(),
-      tokenVault: tokenVault.toBase58(),
-      mintKey: mintKey.publicKey.toBase58(),
-    })
 
     // Generate the nested ATA address
     const tokenVaultNestedAta = await getOrCreateAssociatedTokenAccount(
@@ -144,31 +141,19 @@ describe("step-staking-test", () => {
   
     // Assert the token balance in the vault is updated
     const vaultAccountInfo = await getAccount(provider.connection, tokenVault);
-    console.log({vaultAccountInfo})
     expect(vaultAccountInfo.amount.toString()).to.equal("1000000");
   });  
 
-  // it("reclaim mint authority", async () => {
-    // const [tokenVault, nonce] = await anchor.web3.PublicKey.findProgramAddressSync(
-    //   [tokenMint.toBuffer()],
-    //   program.programId
-    // );
+  it("reclaim mint authority", async () => {
+    await program.methods.reclaimMintAuthority(nonce).accounts({
+      tokenMint,
+      xTokenMint,
+      tokenVault,
+      authority: tokenMintAuthority.publicKey,
+      tokenProgram: TOKEN_PROGRAM_ID
+    }).signers([tokenMintAuthority]).rpc();
 
-    // await setAuthority(
-    //   provider.connection,
-    //   mintKey,
-    //   tokenMint,
-    //   mintKey,
-    //   AuthorityType.MintTokens,
-    //   tokenVault,
-    // )
-
-    // await program.methods.reclaimMintAuthority(nonce).accounts({
-    //   tokenMint,
-    //   xTokenMint,
-    //   tokenVault,
-    //   authority: mintKey.publicKey,
-    //   tokenProgram: TOKEN_PROGRAM_ID
-    // }).signers([mintKey]).rpc();
-  // })
+    const xMintInfo = await getMint(provider.connection, xTokenMint);
+    expect(xMintInfo.mintAuthority.toBase58()).to.be.equal(tokenMintAuthority.publicKey.toBase58());
+  })
 });
