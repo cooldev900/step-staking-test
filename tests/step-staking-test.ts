@@ -13,10 +13,14 @@ import {
   createMint,
   getMint,
   getOrCreateAssociatedTokenAccount,
+  createAccount,
+  createInitializeAccountInstruction,
 } from "@solana/spl-token";
 import { expect } from "chai";
-import { Keypair, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
+import { Keypair, LAMPORTS_PER_SOL, PublicKey, sendAndConfirmTransaction, SystemProgram, Transaction, TransactionInstruction } from "@solana/web3.js";
 import { SPL_SYSTEM_PROGRAM_ID } from "@metaplex-foundation/mpl-toolbox";
+import { ASSOCIATED_PROGRAM_ID } from "@coral-xyz/anchor/dist/cjs/utils/token";
+import { min } from "bn.js";
 
 dotenv.config();
 
@@ -57,25 +61,9 @@ describe("step-staking-test", () => {
       9
     );
 
-    // const tokenAccount = await getOrCreateAssociatedTokenAccount(
-    //   provider.connection,
-    //   mintKey,
-    //   tokenMint,
-    //   mintKey.publicKey
-    // )
-
-    // await mintTo(
-    //   provider.connection,
-    //   mintKey,
-    //   tokenMint,
-    //   tokenAccount.address,
-    //   tokenMintAuthority,
-    //   100000000000 // because decimals for the mint are set to 9 
-    // )
-
-    const [tokenVault, nonce] = await anchor.web3.PublicKey.findProgramAddressSync(
+    [tokenVault, nonce] = await anchor.web3.PublicKey.findProgramAddressSync(
       [tokenMint.toBuffer()],
-      program.programId
+      program.programId,
     );
 
     await program.methods.initialize().accounts({
@@ -84,14 +72,81 @@ describe("step-staking-test", () => {
       systemProgram: SPL_SYSTEM_PROGRAM_ID,
       tokenProgram: TOKEN_PROGRAM_ID,
       tokenVault,
-    })
+    }).signers([mintKey]).rpc();
   });
 
   it("initialize", async () => {
     const mintInfo = await getMint(provider.connection, tokenMint);
     expect(mintInfo.mintAuthority.toBase58()).to.be.equal(tokenMintAuthority.publicKey.toBase58());
     expect(mintInfo.supply).to.be.equal(BigInt(0));
-  })
+  });
+
+  it("Withdraw nested ATA", async () => {
+    const refundee = anchor.web3.Keypair.generate();
+
+    await provider.connection.confirmTransaction(
+      await provider.connection.requestAirdrop(
+        refundee.publicKey,
+        1 * anchor.web3.LAMPORTS_PER_SOL
+      )
+    );
+
+    tokenVault = PublicKey.createProgramAddressSync(
+      [tokenMint.toBuffer(), Buffer.from([nonce])],
+      program.programId,
+    );
+    console.log({tokenMint: tokenMint.toBase58(),
+      tokenVault: tokenVault.toBase58(),
+      mintKey: mintKey.publicKey.toBase58(),
+    })
+
+    // Generate the nested ATA address
+    const tokenVaultNestedAta = await getOrCreateAssociatedTokenAccount(
+      provider.connection,
+      mintKey,
+      tokenMint,
+      tokenVault,
+      true,
+    );
+  
+    //Mint tokens to the manually created token account
+    await mintTo(
+      provider.connection,
+      mintKey,
+      tokenMint,
+      tokenVaultNestedAta.address,
+      tokenMintAuthority, // Mint authority
+      1_000_000
+    );
+
+  
+    await program.methods
+      .withdrawNested()
+      .accounts({
+        refundee: refundee.publicKey,
+        tokenMint,
+        tokenVault,
+        tokenVaultNestedAta: tokenVaultNestedAta.address,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_PROGRAM_ID,
+      })
+      .signers([])
+      .rpc();
+  
+    // Assert the token vault nested ATA is closed
+    try {
+      await getAccount(provider.connection, tokenVaultNestedAta.address);
+      throw new Error("Nested ATA should be closed but is still active.");
+    } catch (e) {
+      console.log(e.message)
+      expect(e.message).to.be;
+    }
+  
+    // Assert the token balance in the vault is updated
+    const vaultAccountInfo = await getAccount(provider.connection, tokenVault);
+    console.log({vaultAccountInfo})
+    expect(vaultAccountInfo.amount.toString()).to.equal("1000000");
+  });  
 
   // it("reclaim mint authority", async () => {
     // const [tokenVault, nonce] = await anchor.web3.PublicKey.findProgramAddressSync(
@@ -116,65 +171,4 @@ describe("step-staking-test", () => {
     //   tokenProgram: TOKEN_PROGRAM_ID
     // }).signers([mintKey]).rpc();
   // })
-
-  // it("Withdraw nested ATA", async () => {
-    // const refundee = anchor.web3.Keypair.generate();
-  
-    // // Find the PDA for the token vault
-    // const [tokenVault] = await anchor.web3.PublicKey.findProgramAddressSync(
-    //   [tokenMint.toBuffer()],
-    //   program.programId
-    // );
-  
-    // // Generate the nested ATA address
-    // const tokenVaultNestedAta = await getAssociatedTokenAddress(
-    //   tokenMint,
-    //   tokenVault, // The "owner" is the primary vault
-    //   true
-    // );
-
-    // // Create the nested ATA
-    // await createAssociatedTokenAccount(
-    //   provider.connection,
-    //   mintKey,           // Wallet funding the creation
-    //   tokenMint,
-    //   tokenVault     // Nested ATA owner
-    // );
-  
-    // Mint tokens to the manually created token account
-    // await mintTo(
-    //   provider.connection,
-    //   mintKey,
-    //   tokenMint,
-    //   tokenVaultNestedAta,
-    //   mintKey, // Mint authority
-    //   1_000_000
-    // );
-  
-    // await program.methods
-    //   .withdrawNested()
-    //   .accounts({
-    //     refundee: refundee.publicKey,
-    //     tokenMint,
-    //     tokenVault,
-    //     tokenVaultNestedAta,
-    //     tokenProgram: TOKEN_PROGRAM_ID,
-    //     associatedTokenProgram: ASSOCIATED_PROGRAM_ID,
-    //   })
-    //   .signers([])
-    //   .rpc();
-  
-    // // // Assert the token vault nested ATA is closed
-    // try {
-    //   await getAccount(provider.connection, tokenVaultNestedAta);
-    //   throw new Error("Nested ATA should be closed but is still active.");
-    // } catch (e) {
-    //   expect(e.message).to.include("Failed to find account");
-    // }
-  
-    // // Assert the token balance in the vault is updated
-    // const vaultAccountInfo = await getAccount(provider.connection, tokenVault);
-    // console.log({vaultAccountInfo})
-    // expect(vaultAccountInfo.amount.toString()).to.equal("1000000");
-  // });  
 });
