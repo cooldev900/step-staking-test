@@ -11,7 +11,7 @@ import {
   getOrCreateAssociatedTokenAccount,
 } from "@solana/spl-token";
 import { expect } from "chai";
-import { Keypair, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
+import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
 import { SPL_SYSTEM_PROGRAM_ID } from "@metaplex-foundation/mpl-toolbox";
 import { ASSOCIATED_PROGRAM_ID } from "@coral-xyz/anchor/dist/cjs/utils/token";
 
@@ -155,5 +155,44 @@ describe("step-staking-test", () => {
 
     const xMintInfo = await getMint(provider.connection, xTokenMint);
     expect(xMintInfo.mintAuthority.toBase58()).to.be.equal(tokenMintAuthority.publicKey.toBase58());
-  })
+  });
+
+  it("stake", async () => {
+    const tokenFrom = await getOrCreateAssociatedTokenAccount(
+      provider.connection,
+      mintKey,
+      tokenMint,
+      mintKey.publicKey
+    );
+
+    await mintTo(
+      provider.connection,
+      mintKey,
+      tokenMint,
+      tokenFrom.address,
+      tokenMintAuthority,
+      1_000_000,
+    )
+
+    const to = anchor.web3.Keypair.generate();
+    const xTokenTo = await getOrCreateAssociatedTokenAccount(
+      provider.connection,
+      mintKey,
+      xTokenMint,
+      to.publicKey,
+    );
+
+    await program.methods.stake(nonce, new anchor.BN(1_000_000)).accounts({
+      tokenMint,
+      xTokenMint,
+      tokenFrom: tokenFrom.address,
+      tokenFromAuthority: mintKey.publicKey,
+      xTokenTo: xTokenTo.address,
+      tokenVault,
+      tokenProgram: TOKEN_PROGRAM_ID,
+    }).signers([mintKey]).rpc();
+
+    const xTokenToInfo = await getAccount(provider.connection, xTokenTo.address);
+    expect(xTokenToInfo.amount).to.be.equal(BigInt(1_000_000));
+  });
 });
